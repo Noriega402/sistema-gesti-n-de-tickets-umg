@@ -1,0 +1,27 @@
+# --- DEPENDENCIAS PHP (Composer) ---
+/vendor/
+composer.lock
+
+# --- CONFIGURACIONES LOCALES ---
+/.env
+*.log
+*.bak
+*.tmp
+.DS_Store
+Thumbs.db
+
+# --- CONFIGURACIONES XAMPP / IDE ---
+.idea/
+.vscode/
+*.iml
+
+# --- ARCHIVOS DE SISTEMA ---
+/nbproject/
+.sass-cache/
+.cache/
+node_modules/
+
+# --- COPIAS / BACKUPS TEMPORALES ---
+/uploads/tmp/
+/temp/
+/tmp/
