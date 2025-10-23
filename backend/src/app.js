@@ -4,7 +4,7 @@ import cors from 'cors';
 import rateLimit from 'express-rate-limit';
 
 import { router as authRouter } from './routes/auth.js';
-import { router as ticketsRouter } from './routes/tickets.js';
+import ticketsRouter from './routes/tickets.js';
 import { router as jobsRouter } from './routes/jobs.js';
 import { serverAdapter } from './queues/index.js';  // <- de queues/index.js
 
@@ -27,4 +27,3 @@ app.use('/jobs', jobsRouter);
 app.use('/queues', serverAdapter.getRouter());
 
 export default app;
-
