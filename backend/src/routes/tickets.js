@@ -1,121 +1,103 @@
-// src/routes/tickets.js  (ESM compatible con módulos CJS existentes)
 import express from 'express';
-
-// Si mailer.js es CommonJS (module.exports = { sendTicketCreated, sendTicketStatusChanged })
-// entonces impórtalo como default y desestructura:
-import mailer from '../email/mailer.js';
-const { sendTicketCreated, sendTicketStatusChanged } = mailer;
-
-// Si TicketsRepo.js es CommonJS (module.exports = {...}), también default:
-import Tickets from '../email/ticketsRepo.js';
-
-// Si validateTicket.js es CommonJS (module.exports = fn), default también:
-import validateTicket from '../middlewares/validateTicket.js';
-
 const router = express.Router();
 
-//  CREAR TICKET (POST /tickets)
-router.post('/', validateTicket, async (req, res) => {
+import { authRequired, requireRole } from '../middlewares/auth.js';
+import { transporter, fromAddress } from '../email/mailer.js';
+import { sendTicketCreated, sendTicketStatusChanged } from '../email/mailer.js';
+import * as Tickets from '../model/ticketsRepo.js';
+import { pool } from '../db.js';
+
+// CREATE (POST /tickets) -> client o admin
+router.post('/', authRequired, requireRole('client', 'admin'), async (req, res) => {
   try {
-    const { email, nombre, asunto, descripcion } = req.body;
+    const { title, description, priority } = req.body;
+    if (!title) return res.status(400).json({ ok: false, error: 'Falta title' });
 
-    const ticket = await Tickets.create({
-      email,
-      nombre,
-      asunto,
-      descripcion,
-      estado: 'abierto',
-      creadoEn: new Date().toISOString()
-    });
+    // Normaliza prioridad para el ENUM
+    const allowed = new Set(['low', 'medium', 'high']);
+    const prio = allowed.has(priority) ? priority : 'low';
 
-    console.log('Ticket creado, intentando enviar correo a:', email);
+    // ID del usuario autenticado viene en el claim 'sub'
+    const clientId = req.user.sub;
 
-    // Enviar correo (no bloquea la respuesta)
-    sendTicketCreated(email, ticket);
+    // Inserta ticket
+    const [ins] = await pool.query(
+      `INSERT INTO tickets (title, description, priority, client_id)
+       VALUES (?,?,?,?)`,
+      [title, description || '', prio, clientId]
+    );
 
-    console.log('Función sendTicketCreated() ejecutada correctamente.');
+    // === NUEVO: obtener email/nombre del cliente y enviar correo ===
+    try {
+      // Trae el usuario que creó el ticket
+      const [[client]] = await pool.query(
+        'SELECT name, email FROM users WHERE id = ?',
+        [clientId]
+      );
 
+      if (client && client.email) {
+        await transporter.sendMail({
+          from: fromAddress,
+          to: client.email,
+          subject: `Ticket #${ins.insertId} creado`,
+          html: `
+            <p>Hola ${client.name || 'cliente'},</p>
+            <p>Tu ticket <b>#${ins.insertId}</b> fue creado con éxito.</p>
+            <p><b>Asunto:</b> ${title}</p>
+            <p><b>Prioridad:</b> ${prio}</p>
+            <p>Gracias por contactarnos.</p>
+          `
+        });
+      }
+    } catch (errMail) {
+      console.warn('Email error:', errMail.message);
+      // no cortamos la respuesta si falla el SMTP
+    }
 
-    res.status(201).json({
+    return res.status(201).json({
       ok: true,
-      message: 'Ticket creado correctamente',
-      ticket
+      ticket: { id: ins.insertId, title, priority: prio, status: 'pending' }
     });
-  } catch (error) {
-    console.error('Error al crear ticket:', error);
-    res.status(500).json({ ok: false, error: 'Error interno al crear el ticket.' });
+  } catch (e) {
+    console.error(e);
+    return res.status(500).json({ ok: false, error: 'No se pudo crear el ticket' });
   }
 });
 
-//  LISTAR TODOS (GET /tickets)
-router.get('/', async (_req, res) => {
+// ASIGNAR TÉCNICO (POST /tickets/:id/assign) -> admin
+router.post('/:id/assign', authRequired, requireRole('admin'), async (req, res) => {
   try {
-    const tickets = await Tickets.findAll();
-    res.json({ ok: true, tickets });
-  } catch (error) {
-    console.error('Error al listar tickets:', error);
-    res.status(500).json({ ok: false, error: 'Error al obtener tickets.' });
+    const { technician_id } = req.body;
+    await Tickets.assignTechnician(req.params.id, technician_id || null);
+    res.json({ ok: true, message: 'Asignado' });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ ok: false, error: 'No se pudo asignar' });
   }
 });
 
-//  OBTENER UNO (GET /tickets/:id)
-router.get('/:id', async (req, res) => {
+// CAMBIAR ESTADO (PATCH /tickets/:id/status) -> tech o admin
+router.patch('/:id/status', authRequired, requireRole('tech', 'admin'), async (req, res) => {
   try {
-    const ticket = await Tickets.findById(req.params.id);
-    if (!ticket) {
-      return res.status(404).json({ ok: false, error: 'Ticket no encontrado.' });
-    }
-    res.json({ ok: true, ticket });
-  } catch (error) {
-    console.error('Error al obtener ticket:', error);
-    res.status(500).json({ ok: false, error: 'Error al buscar ticket.' });
-  }
-});
+    const { status } = req.body; // 'pending'|'in_progress'|'resolved'
+    const updated = await Tickets.updateStatus(req.params.id, status);
 
-//  ACTUALIZAR ESTADO (PUT /tickets/:id/estado)
-router.put('/:id/estado', async (req, res) => {
-  try {
-    const { id } = req.params;
-    const { nuevoEstado } = req.body;
+    // Opcional: notificar al cliente por correo
+    try {
+      const client = await Tickets.findClientEmail(updated.client_id);
+      if (client?.email) {
+        await sendTicketStatusChanged(client.email, {
+          id: updated.id,
+          nombre: client.name || 'usuario',
+          status: updated.status
+        });
+      }
+    } catch (errMail) { console.warn('Email not sent:', errMail.message); }
 
-    if (!nuevoEstado) {
-      return res.status(400).json({ ok: false, error: 'Debe indicar el nuevo estado.' });
-    }
-
-    const ticket = await Tickets.findById(id);
-    if (!ticket) {
-      return res.status(404).json({ ok: false, error: 'Ticket no encontrado.' });
-    }
-
-    const old = ticket.estado;
-    ticket.estado = nuevoEstado;
-    await Tickets.update(ticket);
-
-    // Notifica cambio de estado
-    sendTicketStatusChanged(ticket.email, ticket, old, nuevoEstado);
-
-    res.json({
-      ok: true,
-      message: `Ticket actualizado de '${old}' a '${nuevoEstado}'`,
-      ticket
-    });
-  } catch (error) {
-    console.error('Error al actualizar ticket:', error);
-    res.status(500).json({ ok: false, error: 'Error al actualizar el estado del ticket.' });
-  }
-});
-
-//  ELIMINAR (DELETE /tickets/:id)
-router.delete('/:id', async (req, res) => {
-  try {
-    const deleted = await Tickets.delete(req.params.id);
-    if (!deleted) {
-      return res.status(404).json({ ok: false, error: 'Ticket no encontrado.' });
-    }
-    res.json({ ok: true, message: 'Ticket eliminado correctamente.' });
-  } catch (error) {
-    console.error('Error al eliminar ticket:', error);
-    res.status(500).json({ ok: false, error: 'Error al eliminar el ticket.' });
+    res.json({ ok: true, ticket: updated });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ ok: false, error: 'No se pudo actualizar el estado' });
   }
 });
 

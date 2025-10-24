@@ -3,7 +3,7 @@ import helmet from 'helmet';
 import cors from 'cors';
 import rateLimit from 'express-rate-limit';
 
-import { router as authRouter } from './routes/auth.js';
+import authRouter from './routes/auth.js';
 import ticketsRouter from './routes/tickets.js';
 import { router as jobsRouter } from './routes/jobs.js';
 import { serverAdapter } from './queues/index.js';  // <- de queues/index.js

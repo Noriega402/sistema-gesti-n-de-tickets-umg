@@ -1,111 +1,47 @@
-import fs from 'node:fs';
-import path from 'node:path';
-import buildTransport from './transporter.js';
-import queue from './mailQueue.js';
+import nodemailer from "nodemailer";
 
-const transporter = buildTransport();
+export const fromAddress =
+  process.env.SMTP_FROM || 'Soporte <no-reply@localhost>';
 
-function escapeHtml(s = '') {
-  return String(s)
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#039;');
-}
+export const transporter = nodemailer.createTransport({
+  host: process.env.SMTP_HOST || "localhost",
+  port: Number(process.env.SMTP_PORT || 587),
+  secure: true, // true si se usa el puerto 465
+  auth: (process.env.SMTP_USER && process.env.SMTP_PASS) ? {
+    user: process.env.SMTP_USER,
+    pass: process.env.SMTP_PASS,
+  } : undefined,
+});
 
-function enqueueMail({ to, subject, text, html, meta }) {
-  queue.add(async () => {
-    const info = await transporter.sendMail({
-      to,
-      from: process.env.MAIL_FROM || 'Tickets <no-reply@localhost>',
-      subject,
-      text,
-      html
-    });
-
-    const mode = (process.env.EMAIL_TRANSPORT || 'direct').toLowerCase();
-    if (mode === 'console' || mode === 'file') {
-      const eml =
-        info.message && info.message.toString
-          ? info.message.toString()
-          : String(info.message || '');
-
-      // Mostrar en consola
-      console.log('--- EMAIL (simulado) ---\n' + eml + '\n--- /EMAIL ---');
-
-      // Guardar a archivo si elegiste "file"
-      if (mode === 'file') {
-        const dir = path.join(process.cwd(), 'out-emails');
-        if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-        const filename = subject.replace(/[^\w.-]+/g, '_').slice(0, 60);
-        fs.writeFileSync(path.join(dir, `${Date.now()}_${filename}.eml`), eml);
-      }
-    }
-  }, meta);
-}
-
-export function sendTicketCreated(to, ticket) {
-  console.log('Entrando a sendTicketCreated() para:', to, 'Ticket ID:', ticket.id);
-
-  const subject = `Ticket #${ticket.codigo || ticket.id} creado`;
-  const text = [
-    `Hola ${ticket.nombre || 'usuario'},`,
-    `Tu ticket fue registrado.`,
-    `ID: ${ticket.codigo || ticket.id}`,
-    `Asunto: ${ticket.asunto || ticket.titulo || '(sin asunto)'}`,
-    `Estado: ${ticket.estado || 'abierto'}`
-  ].join('\n');
-
+/** Email: ticket creado */
+export async function sendTicketCreated({ to, ticketId, name, title, priority }) {
+  if (!to) return;
   const html = `
-    <div style="font-family:system-ui,Segoe UI,Arial,sans-serif">
-      <h2>Ticket #${ticket.codigo || ticket.id} creado</h2>
-      <p>Hola ${escapeHtml(ticket.nombre || 'usuario')}, tu ticket fue registrado:</p>
-      <ul>
-        <li><b>ID:</b> ${escapeHtml(String(ticket.codigo || ticket.id))}</li>
-        <li><b>Asunto:</b> ${escapeHtml(ticket.asunto || ticket.titulo || '(sin asunto)')}</li>
-        <li><b>Estado:</b> ${escapeHtml(ticket.estado || 'abierto')}</li>
-      </ul>
-    </div>
+    <p>Hola ${name || "cliente"},</p>
+    <p>Tu ticket <b>#${ticketId}</b> fue creado con éxito.</p>
+    <p><b>Asunto:</b> ${title}</p>
+    <p><b>Prioridad:</b> ${priority}</p>
+    <p>Gracias por contactarnos.</p>
   `;
-
-  console.log('Encolando correo de ticket creado...');
-  enqueueMail({
+  await transporter.sendMail({
+    from: fromAddress,
     to,
-    subject,
-    text,
+    subject: `Ticket #${ticketId} creado`,
     html,
-    meta: { type: 'created', id: ticket.id || ticket.codigo }
-  });
-  console.log('Correo encolado correctamente.');
-
-}
-
-export function sendTicketStatusChanged(to, ticket, oldStatus, newStatus) {
-  const subject = `Ticket #${ticket.codigo || ticket.id} actualizado: ${newStatus}`;
-  const text = [
-    `Hola ${ticket.nombre || 'usuario'},`,
-    `El estado cambió de "${oldStatus}" a "${newStatus}".`,
-    `Asunto: ${ticket.asunto || ticket.titulo || '(sin asunto)'}`
-  ].join('\n');
-
-  const html = `
-    <div style="font-family:system-ui,Segoe UI,Arial,sans-serif">
-      <h2>Actualización de ticket #${ticket.codigo || ticket.id}</h2>
-      <p>Hola ${escapeHtml(ticket.nombre || 'usuario')},</p>
-      <p>El estado cambió de <b>${escapeHtml(oldStatus)}</b> a <b>${escapeHtml(newStatus)}</b>.</p>
-      <p><b>Asunto:</b> ${escapeHtml(ticket.asunto || ticket.titulo || '(sin asunto)')}</p>
-    </div>
-  `;
-
-  enqueueMail({
-    to,
-    subject,
-    text,
-    html,
-    meta: { type: 'status', id: ticket.id || ticket.codigo }
   });
 }
 
-// opcional por si en algún sitio haces import default
-export default { sendTicketCreated, sendTicketStatusChanged };
+/** Email: cambio de estado */
+export async function sendTicketStatusChanged({ to, ticketId, name, status }) {
+  if (!to) return;
+  const html = `
+    <p>Hola ${name || "cliente"},</p>
+    <p>Tu ticket <b>#${ticketId}</b> cambió su estado a <b>${status}</b>.</p>
+  `;
+  await transporter.sendMail({
+    from: fromAddress,
+    to,
+    subject: `Ticket #${ticketId} actualizado`,
+    html,
+  });
+}
