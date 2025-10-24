@@ -5,18 +5,28 @@ import { Link } from "react-router-dom";
 
 function TicketForm() {
   const qc = useQueryClient();
+  const [email, setEmail] = useState("");
+  const [nombre, setNombre] = useState("");
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
-  const [priority, setPriority] = useState("low");
+
   const create = useMutation({
-    mutationFn: () => api.post("/tickets", { title, description, priority }),
+    mutationFn: () =>
+      api.post("/tickets", {
+        title,
+        description,
+        priority,
+        client_id: 1,// ID de cliente fijo para este ejemplo
+      }),
     onSuccess: () => {
       qc.invalidateQueries(["tickets"]);
+      setEmail("");
+      setNombre("");
       setTitle("");
       setDescription("");
-      setPriority("low");
     },
   });
+
   return (
     <form
       onSubmit={(e) => {
@@ -27,24 +37,34 @@ function TicketForm() {
     >
       <h3>Nuevo Ticket</h3>
       <input
-        placeholder="Título"
+        placeholder="Email"
+        type="email"
+        value={email}
+        onChange={(e) => setEmail(e.target.value)}
+        required
+      />{" "}
+      <input
+        placeholder="Nombre"
+        value={nombre}
+        onChange={(e) => setNombre(e.target.value)}
+        required
+      />
+      <br />
+      <input
+        placeholder="Asunto"
         value={title}
         onChange={(e) => setTitle(e.target.value)}
         required
-      />{" "}
-      <select value={priority} onChange={(e) => setPriority(e.target.value)}>
-        <option value="low">Baja</option>
-        <option value="medium">Media</option>
-        <option value="high">Alta</option>
-      </select>
+      />
       <br />
       <textarea
         placeholder="Descripción"
         value={description}
         onChange={(e) => setDescription(e.target.value)}
+        required
       />
       <br />
-      <button>Crear (encola trabajos)</button>
+      <button>Crear ticket</button>
     </form>
   );
 }
@@ -56,7 +76,7 @@ export default function Dashboard() {
   const { data: rows = [] } = useQuery({
     queryKey: ["tickets"],
     queryFn: async () => {
-      const json = (await api.get("/tickets")).data; // puede ser [] o { ok, tickets: [] }
+      const json = (await api.get("/tickets")).data;
 
       // 1) extrae la lista de forma segura
       const list = Array.isArray(json)

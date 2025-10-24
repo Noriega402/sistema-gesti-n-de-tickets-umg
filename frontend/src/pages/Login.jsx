@@ -1,39 +1,52 @@
-import React, { useState } from 'react'
-import api from '../api'
+import React, { useState } from "react";
+import { useNavigate, Link } from "react-router-dom";
+import { apiLogin } from "../api";
 
-export default function Login() {
-  const [email, setEmail] = useState('')
-  const [password, setPassword] = useState('')
-  const [error, setError] = useState('')
+export default function LoginPage() {
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [err, setErr] = useState("");
+  const [loading, setLoading] = useState(false);
+  const navigate = useNavigate();
 
-  const onSubmit = async (e) => {
-    e.preventDefault()
-    setError('')
+  async function onSubmit(e) {
+    e.preventDefault();
+    setErr(""); setLoading(true);
     try {
-      const { data } = await api.post('/auth/login', { email, password })
-      localStorage.setItem('access', data.access)
-      localStorage.setItem('refresh', data.refresh)
-      window.location.href = '/'
-    } catch (e) {
-      setError(e?.response?.data?.error || 'Error')
-    }
+      const { access, refresh, user } = await apiLogin({ email, password });
+      localStorage.setItem("token", access);
+      localStorage.setItem("refresh", refresh);
+      localStorage.setItem("user", JSON.stringify(user));
+      navigate("/tickets", { replace: true });
+    } catch (error) {
+      setErr("Credenciales inválidas o servidor no disponible.");
+    } finally { setLoading(false); }
   }
 
   return (
-    <div style={{ maxWidth: 420, margin: '40px auto', fontFamily: 'system-ui' }}>
-      <h2>Iniciar sesión</h2>
-      <form onSubmit={onSubmit}>
-        <div>
-          <label>Email</label><br/>
-          <input value={email} onChange={e=>setEmail(e.target.value)} required />
-        </div>
-        <div style={{ marginTop: 8 }}>
-          <label>Contraseña</label><br/>
-          <input type="password" value={password} onChange={e=>setPassword(e.target.value)} required />
-        </div>
-        {error && <p style={{ color: 'red' }}>{error}</p>}
-        <button style={{ marginTop: 12 }}>Entrar</button>
-      </form>
+    <div className="container">
+      <div className="card" style={{ maxWidth: 420, margin: "40px auto" }}>
+        <h1>Iniciar sesión</h1>
+        {err && <div className="alert alert-error" style={{ marginBottom: 12 }}>{err}</div>}
+        <form onSubmit={onSubmit}>
+          <div className="form-row">
+            <label className="label">Correo</label>
+            <input className="input" type="email" value={email}
+              onChange={(e)=>setEmail(e.target.value)} required autoComplete="email" />
+          </div>
+          <div className="form-row">
+            <label className="label">Contraseña</label>
+            <input className="input" type="password" value={password}
+              onChange={(e)=>setPassword(e.target.value)} required autoComplete="current-password" />
+          </div>
+          <button className="btn btn-primary" disabled={loading}>
+            {loading ? "Ingresando..." : "Ingresar"}
+          </button>
+          <p style={{ marginTop: 12 }}>
+            ¿No tienes cuenta? <Link to="/register">Crear cuenta</Link>
+          </p>
+        </form>
+      </div>
     </div>
-  )
+  );
 }
